@@ -1,0 +1,40 @@
+{
+    // C语言文件的特定设置
+    "[c]": {
+        // 设置缩进大小 
+        "editor.tabSize": 4,
+        // "editor.detectIndentation":true,
+        // 
+        "editor.insertSpaces": false,
+        // 在第80列显示标尺，提醒不要超过80字符宽度（Linux内核规范）
+        "editor.rulers": [
+            80
+        ],
+        // 保存文件时自动格式化
+        "editor.formatOnSave": false,
+    },
+    // C++语言文件的特定设置（与C语言类似）
+    "[cpp]": {
+        // 设置缩进大小  
+        "editor.tabSize": 4,
+        "editor.insertSpaces": false,
+        // 在第80列显示标尺
+        "editor.rulers": [
+            80
+        ],
+        // 保存文件时自动格式化
+        "editor.formatOnSave": false,
+    },
+    // clang-format配置
+    "C_Cpp.formatting": "clangFormat",
+    // "C_Cpp.clang_format_style": "{BasedOnStyle: LLVM, IndentWidth: 4, BreakBeforeBraces: Custom, BraceWrapping: { AfterFunction: true, AfterControlStatement: false, AfterClass: true }, AlignTrailingComments: true, AllowShortLoopsOnASingleLine: false, ColumnLimit: 80, IndentCaseLabels: true, TabWidth: 4}"
+    "C_Cpp.clang_format_style": "{ BasedOnStyle: LLVM, BreakBeforeBraces: Custom, BraceWrapping: { AfterFunction: true, AfterClass: true, AfterStruct: true, AfterEnum: true, AfterNamespace: true, AfterUnion: true, BeforeElse: false, BeforeWhile: false, AfterControlStatement: Never }, IndentWidth: 4, TabWidth: 4, UseTab: Never, ColumnLimit: 100  }",
+}
+// | 配置项                                            | 作用                                  |
+// | ---------------------------------------------- | ----------------------------------- |
+// | `BreakBeforeBraces: Custom`                    | 使用自定义大括号换行规则                        |
+// | `AfterFunction: true`                          | 函数定义的大括号换行                          |
+// | `AfterClass/Struct/Enum/Namespace/Union: true` | 类、结构体等的大括号换行                        |
+// | `AfterControlStatement: Never`                 | `if`、`while`、`for` 等控制语句的大括号**不换行** |
+// | `BeforeElse: false`                            | `else` 前面不换行                        |
+// | `BeforeWhile: false`                           | `do-while` 中的 `while` 前面不换行         |
