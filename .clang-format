@@ -1,0 +1,23 @@
+---
+BasedOnStyle: LLVM
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: true
+  AfterStruct: true
+  AfterEnum: true
+  AfterNamespace: true
+  AfterUnion: true
+  BeforeElse: false
+  BeforeWhile: false
+  AfterControlStatement: Never
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 80
+PenaltyExcessCharacter: 100
+AlignConsecutiveMacros: true
+AlignConsecutiveAssignments: false
+ForEachMacros: []
+StatementMacros: []
+ 

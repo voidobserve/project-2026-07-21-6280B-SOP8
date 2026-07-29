@@ -27,8 +27,7 @@
     },
     // clang-format配置
     "C_Cpp.formatting": "clangFormat",
-    // "C_Cpp.clang_format_style": "{BasedOnStyle: LLVM, IndentWidth: 4, BreakBeforeBraces: Custom, BraceWrapping: { AfterFunction: true, AfterControlStatement: false, AfterClass: true }, AlignTrailingComments: true, AllowShortLoopsOnASingleLine: false, ColumnLimit: 80, IndentCaseLabels: true, TabWidth: 4}"
-    "C_Cpp.clang_format_style": "{ BasedOnStyle: LLVM, BreakBeforeBraces: Custom, BraceWrapping: { AfterFunction: true, AfterClass: true, AfterStruct: true, AfterEnum: true, AfterNamespace: true, AfterUnion: true, BeforeElse: false, BeforeWhile: false, AfterControlStatement: Never }, IndentWidth: 4, TabWidth: 4, UseTab: Never, ColumnLimit: 100  }",
+    "Codegeex.RepoIndex": true, // 使用 clang-format 进行格式化
 }
 // | 配置项                                            | 作用                                  |
 // | ---------------------------------------------- | ----------------------------------- |

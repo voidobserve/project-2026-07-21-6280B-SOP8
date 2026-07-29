@@ -32,9 +32,11 @@ volatile u16 pwr_off_cnt = 0; // xx min 自动关机的倒计时
 */
 volatile u8 into_low_power_cnt = 0;
 
-volatile u8 charge_anim_phase = 0; // 控制充电动画 (REVIEW: 刚进入充电时，要注意清零)
+// 控制充电动画 (REVIEW: 刚进入充电时，要注意清零)
+volatile u8 charge_anim_phase = 0;
 
-volatile u16 charge_fully_cnt = 0; // 充满电的计数值(REVIEW: 刚进入充电时，要注意清零)
+// 充满电的计数值(REVIEW: 刚进入充电时，要注意清零)
+volatile u16 charge_fully_cnt = 0;
 
 volatile u8 led_sta_refresh_cnt = 0;
 
@@ -277,7 +279,7 @@ void pen_pwr_off(void)
 {
     PUCON |= (0x01 << 4); // 不使能上拉
     PDCON |= (0x01 << 4); // 不使能下拉
-    DDR1 |= 0x01 << 4;    // P14 输入模式
+    DDR1 |= (0x01 << 4);  // P14 输入模式
 }
 
 // 关闭所有led
@@ -294,7 +296,11 @@ void led_all_off(void)
             (0x01 << 2);  // P12
 }
 
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_JW)
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+// 只有四个指示灯的设备，才有 led1 的接口
+
 void led1_on(void)
 {
     // 不使用的引脚配置为输入模式，如果每次都关所有灯，再点亮指定灯，这一步可以省
@@ -349,6 +355,10 @@ void led4_on(void)
     DDR1 &= ~(0x01 << 2); // P12 输出模式
 }
 
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW))
+// 按键双击来进行开关机
+
 // 按键检测，放在10ms定时器中断处理
 void key_scan(void)
 {
@@ -379,7 +389,7 @@ void key_scan(void)
         cur_key_id = KEY_ID_NONE;
     } else {
         // 按键按下
-        cur_key_id = KEY_ID_VAILD;
+        cur_key_id = KEY_ID_VALID;
 
         // 有按键按下，清空自动关机、自动进入低功耗的计时
         pwr_off_cnt = 0;
@@ -426,7 +436,9 @@ void key_scan(void)
             } else {
                 // 通过按键关机之后，立即关闭指示灯，不等led刷新
                 pen_pwr_off();
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_JW)
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
                 flag_led_1_on = 0;
                 flag_led_2_on = 0;
                 flag_led_3_on = 0;
@@ -472,7 +484,153 @@ void key_scan(void)
     last_key_id = cur_key_id;
 }
 
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_JW)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+// 按键 单击 来进行开关机
+
+// 按键检测，放在10ms定时器中断处理
+void key_scan(void)
+{
+    if (flag_is_in_charging) {
+        // 充电期间，不检测按键
+        last_key_id = 0;
+        press_cnt = 0;
+        filter_cnt = 0;
+        filter_key_id = 0;
+        click_delay_cnt = 0;
+        click_cnt = 0;
+        cur_key_id = 0;
+        return;
+    }
+
+    led_all_off();
+#if 1
+    // 按键检测引脚配置 P10
+    PUCON &= ~(0x01 << 0); // 上拉电阻 20K
+    DDR1 |= 0x01 << 0;     // 输入模式
+#else
+    // 使用仿真板上的 P12 检测按键
+    PUCON &= ~(0x01 << 2); // 上拉电阻 20K
+    DDR1 |= (0x01 << 2);   // P12 输入模式
+#endif
+
+    if (1 == KEY_SCAN_PIN) {
+        cur_key_id = KEY_ID_NONE;
+    } else {
+        // 按键按下
+        cur_key_id = KEY_ID_VALID;
+
+        // 有按键按下，清空自动关机、自动进入低功耗的计时
+        pwr_off_cnt = 0;
+        into_low_power_cnt = 0;
+    }
+
+    if (cur_key_id != filter_key_id) {
+        // 如果有按键按下/松开
+        filter_cnt = 0;
+        filter_key_id = cur_key_id;
+        return;
+    }
+
+    if (filter_cnt < KEY_FILTER_TIMES) {
+        // 如果检测到相同的按键按下/松开
+        // 防止计数溢出
+        filter_cnt++;
+        return;
+    }
+
+    // 滤波/消抖完成后，执行到这里
+    if (last_key_id != cur_key_id) {
+        // last_key_id 为有效键值，而 cur_key_id
+        // 为无效键值，说明按键刚开始松开
+        if (cur_key_id == KEY_ID_NONE) {
+            // 开始计时，等待下次按键按下，最后判断有没有按键连击
+            click_delay_cnt = 0;
+        } else // cur_key_id 为有效键值，而 last_key_id
+               // 为无效键值，说明按键刚按下
+        {
+            press_cnt = 0; // 重置按键按下时间计数
+            click_cnt++;
+        }
+
+        if (click_cnt == 1) {
+            // click_cnt == 1 // 单击
+            /*
+                客户说开关机的速度太慢，
+                改成按键刚按下，就处理该事件
+            */
+            flag_is_dev_working = ~flag_is_dev_working;
+
+            if (flag_is_dev_working) {
+                pen_pwr_on();
+                // 让led指示灯立即更新状态
+                led_sta_refresh_cnt = LED_STA_REFRESH_TIME;
+            } else {
+                // 通过按键关机之后，立即关闭指示灯，不等led刷新
+                pen_pwr_off();
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+                // 如果有四个指示灯
+
+                flag_led_1_on = 0;
+                flag_led_2_on = 0;
+                flag_led_3_on = 0;
+                flag_led_4_on = 0;
+#elif 1
+#error "PRODUCT_TYPE error"
+                // #elif (PRODUCT_TYPE == 只有三个指示灯的设备对应的宏)
+
+                // 如果只有三个指示灯
+
+                flag_led_2_on = 0;
+                flag_led_3_on = 0;
+                flag_led_4_on = 0;
+#endif
+            }
+
+            // 处理完成后，清空连击的次数
+            click_cnt = 0;
+        }
+    } else {
+        /*
+            cur_key_id == last_key_id &&
+            cur_key_id == KEY_ID_NONE，说明按键已经松开
+        */
+        if (cur_key_id == KEY_ID_NONE) { // 没有按键按下，说明松手
+            if (click_cnt > 0) {
+                if (click_delay_cnt >= KEY_CLICK_DELAY_TIME) {
+                    // 如果超过了连击的等待时间，直接处理
+                    click_cnt = 0; // 清空连击的次数
+                } else {
+                    if (click_delay_cnt < 255) {
+                        // 防止计数溢出
+                        click_delay_cnt++;
+                    }
+                }
+            }
+        } else {
+            /*
+                cur_key_id == last_key_id &&
+                cur_key_id != KEY_ID_NONE，说明按键按下未松开
+                按键按住不放
+            */
+            if (press_cnt < 255) {
+                press_cnt++;
+            }
+        }
+    }
+
+    last_key_id = cur_key_id;
+}
+#else
+#error "PRODUCT_TYPE error"
+#endif
+
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+// 有四个指示灯的设备
+
 // 放在 100ms 的定时器中断内调用
 void led_status_handle(void)
 {
@@ -560,39 +718,25 @@ void led_status_handle(void)
         } else if (flag_is_dev_working) {
             // 放电时，控制指示灯常亮
 
-            /*
-                USER_TO_DO
-                如果这里采用 flag1.byte |= xx;
-                flag1.byte &= xx;这种方式来给标志位赋值，
-                每个语句块可以节省1个字节空间
-            */
-            if (bat_lev >= BAT_LEV_4V0) {
-                flag_led_4_on = 1;
-                flag_led_3_on = 1;
-                flag_led_2_on = 1;
-                flag_led_1_on = 1;
-            } else if (bat_lev >= BAT_LEV_3V6) {
-                flag_led_4_on = 0;
-                flag_led_3_on = 1;
-                flag_led_2_on = 1;
-                flag_led_1_on = 1;
-            } else if (bat_lev >= BAT_LEV_3V3) {
-                flag_led_4_on = 0;
-                flag_led_3_on = 0;
-                flag_led_2_on = 1;
-                flag_led_1_on = 1;
-            } else if (bat_lev >= BAT_LEV_3V2) {
-                flag_led_4_on = 0;
-                flag_led_3_on = 0;
-                flag_led_2_on = 0;
-                flag_led_1_on = 1;
-            } else {
-                // 目前，小于 3.2V 的电量，指示灯闪烁
-                flag_led_4_on = 0;
-                flag_led_3_on = 0;
-                flag_led_2_on = 0;
+            if (bat_lev < BAT_LEV_3V2) {
                 // 低电量，指示灯闪烁
                 flag_led_1_on = ~flag_led_1_on;
+            }
+
+            if (bat_lev >= BAT_LEV_3V2) {
+                flag_led_1_on = 1;
+            }
+
+            if (bat_lev >= BAT_LEV_3V3) {
+                flag_led_2_on = 1;
+            }
+
+            if (bat_lev >= BAT_LEV_3V6) {
+                flag_led_3_on = 1;
+            }
+
+            if (bat_lev >= BAT_LEV_4V0) {
+                flag_led_4_on = 1;
             }
         } else {
             // 不在充电，设备也没有在工作，关闭所有指示灯
@@ -620,6 +764,8 @@ void led_status_handle(void)
 }
 
 #elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+// 只有三个指示灯的设备
+
 // 放在 100ms 的定时器中断内调用
 void led_status_handle(void)
 {
@@ -697,29 +843,23 @@ void led_status_handle(void)
         } else if (flag_is_dev_working) {
             // 放电时，控制指示灯常亮
 
-            /*
-                USER_TO_DO
-                如果这里采用 flag1.byte |= xx;
-                flag1.byte &= xx;这种方式来给标志位赋值，
-                每个语句块可以节省1个字节空间
-            */
-            if (bat_lev >= BAT_LEV_4V0) {
-                flag_led_4_on = 1;
-                flag_led_3_on = 1;
-                flag_led_2_on = 1;
-            } else if (bat_lev >= BAT_LEV_3V6) {
-                flag_led_4_on = 0;
-                flag_led_3_on = 1;
-                flag_led_2_on = 1;
-            } else if (bat_lev >= BAT_LEV_3V3) {
-                flag_led_4_on = 0;
-                flag_led_3_on = 0;
-                flag_led_2_on = 1;
-            } else {
-                // 目前，小于 3.2V 的电量，指示灯闪烁
-                // 低电量，指示灯闪烁
+            if (bat_lev < BAT_LEV_3V3) {
+                // 小于 3.3V 的电量，指示灯闪烁
                 flag_led_2_on = ~flag_led_2_on;
             }
+
+            if (bat_lev >= BAT_LEV_3V3) {
+                flag_led_2_on = 1;
+            }
+
+            if (bat_lev >= BAT_LEV_3V6) {
+                flag_led_3_on = 1;
+            }
+
+            if (bat_lev >= BAT_LEV_4V0) {
+                flag_led_4_on = 1;
+            }
+
         } else {
             // 不在充电，设备也没有在工作，关闭所有指示灯
             flag_led_2_on = 0;
@@ -746,7 +886,11 @@ void led_status_handle(void)
 
 #endif
 
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_JW)
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+// 有四个指示灯的设备
+
 // 根据电池电量和设备状态，来控制电池电量指示灯
 // 目前暂定在 100us 定时器中断里面调用
 void led_refresh(void)
@@ -764,32 +908,39 @@ void led_refresh(void)
         if (flag_led_1_on) {
             led1_on();
         }
-        sta = 1;
+        // sta = 1;
         break;
     case 1:
         if (flag_led_2_on) {
             led2_on();
         }
-        sta = 2;
+        // sta = 2;
         break;
     case 2:
         if (flag_led_3_on) {
             led3_on();
         }
-        sta = 3;
+        // sta = 3;
         break;
     case 3:
         if (flag_led_4_on) {
             led4_on();
         }
-        sta = 0;
+        // sta = 0;
         break;
 
     default:
         break;
     }
+
+    sta++;
+    if (sta >= 4) {
+        sta = 0;
+    }
 }
 #elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+// 只有三个指示灯的设备
+
 // 根据电池电量和设备状态，来控制电池电量指示灯
 // 目前暂定在 100us 定时器中断里面调用
 void led_refresh(void)
@@ -807,22 +958,27 @@ void led_refresh(void)
         if (flag_led_2_on) {
             led2_on();
         }
-        sta = 1;
+        // sta = 1;
         break;
     case 1:
         if (flag_led_3_on) {
             led3_on();
         }
-        sta = 2;
+        // sta = 2;
         break;
     case 2:
         if (flag_led_4_on) {
             led4_on();
         }
-        sta = 0;
+        // sta = 0;
         break;
     default:
         break;
+    }
+
+    sta++;
+    if (sta >= 3) {
+        sta = 0;
     }
 }
 #endif
@@ -859,20 +1015,16 @@ void main(void)
             PDCON = 0xFF; // 0:Effective 1:invalid
             DDR1 = 0xFF;  // 1:input 0:output
 
-            PUCON &= ~(0x01 << 0);             // 上拉 20K ， P10(按键检测脚)
-            PUCON &= ~(0x01 << 1 | 0x01 << 2); // LED控制 A端和B端，打开上拉
+            PUCON &= ~((0x01 << 0) | // 上拉 20K ， P10(按键检测脚)
+                                     // LED控制 A端和B端，打开上拉
+                       (0x01 << 1) | (0x01 << 2));
 
             // 使能键盘中断
             KBIF = 0; // 清除中断标志
             KBIE = 1; // 使能键盘中断
 
-#if 1
             // P10(按键检测脚) 、 P13(充电检测脚) 打开键盘中断
             P1KBCR |= (0x01 << 0) | (0x01 << 3);
-#else
-            // USER_TO_DO 只在测试时使用，使用 P13(充电检测脚) 、 P12(测试脚)
-            P1KBCR |= (0x01 << 3) | (0x01 << 2);
-#endif
 
             // =================================================================
             // 进入低功耗
@@ -893,7 +1045,6 @@ void main(void)
             Sys_Init();
             user_init();
 
-            // USER_TO_DO 这里跟 bat_lev 在充电时只能增加、放电时只能减小的程序有冲突
             if (CHARGE_PIN == 0) {
                 // 没有在充电，可能是按键唤醒，这里给变量最大值作为初始值
                 tmp_bat_lev = BAT_LEV_4V2; // 唤醒后，给一个默认值
@@ -909,7 +1060,8 @@ void main(void)
                 等 tmp_bat_lev 的值更新
             */
             delay_ms(10);
-            // 强制更新 bat_lev ，防止开机后又立刻刷新了电量，导致显示的电池电量格数变化
+            // 强制更新 bat_lev
+            // ，防止开机后又立刻刷新了电量，导致显示的电池电量格数变化
             bat_lev = tmp_bat_lev;
             flag_is_led_show_enable = 1; // 确保电池电量更新后，再使能led显示
 
@@ -956,10 +1108,15 @@ void int_isr(void) __interrupt
 
                         led_status_handle();
                         if (flag_is_dev_working) {
-                            // 防止计数溢出
-                            if (pwr_off_cnt < DEV_AUTO_SHUTDOWN_TIME) {
-                                pwr_off_cnt++;
-                            }
+                            /*
+                                防止计数溢出
+
+                                现在为了节省程序空间，省略了判断条件，
+                                如果计数条件满足，会在主循环进入低功耗
+                            */
+                            // if (pwr_off_cnt < DEV_AUTO_SHUTDOWN_TIME) {
+                            pwr_off_cnt++;
+                            // }
                         } else {
                             // 不在工作，清空计数
                             pwr_off_cnt = 0;
@@ -991,7 +1148,9 @@ void int_isr(void) __interrupt
                             pen_pwr_off(); // 断开笔头的供电
                                            // 关闭所有指示灯，准备充电动画:
 
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_JW)
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
                             flag_led_1_on = 0;
                             flag_led_2_on = 0;
                             flag_led_3_on = 0;
@@ -1005,7 +1164,8 @@ void int_isr(void) __interrupt
                             // 表示刚进入充电
                             flag_is_charge_begin = 1;
                             charge_anim_phase = 0;
-                            charge_fully_cnt = 0; // 刚进入充电，清空充满电的计数值
+                            // 刚进入充电，清空充满电的计数值
+                            charge_fully_cnt = 0;
                             flag_is_in_charging = 1;
                         }
                     } else {
@@ -1027,11 +1187,11 @@ void int_isr(void) __interrupt
                 }
 
                 // 如果不在充电、设备也没有在工作
-                // if (flag_is_in_charging == 0 && flag_is_dev_working == 0) {
                 if ((CHARGE_PIN == 0) && (flag_is_dev_working == 0)) {
-                    if (into_low_power_cnt < 255) {
-                        into_low_power_cnt++;
-                    }
+
+                    // if (into_low_power_cnt < 255) {
+                    into_low_power_cnt++;
+                    // }
                 } else {
                     into_low_power_cnt = 0;
                 }
@@ -1058,8 +1218,6 @@ void int_isr(void) __interrupt
     if ((T1IF) && (T1IE)) {
         T1IF = 0;
 
-// USER_TO_DO 测试时屏蔽
-#if 1
         led_refresh();
 
         {
@@ -1071,16 +1229,19 @@ void int_isr(void) __interrupt
             }
         }
 
-        // 如果检测到的振动传感器传来的信号，当前检测脚的电平跟上次的不一样
-        // if ((VIBRATION_SENSOR_PIN && last_vibration_sensor_lev == 0) ||
-        //     (VIBRATION_SENSOR_PIN == 0 && last_vibration_sensor_lev)) {
+#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS)
+        如果检测到的振动传感器传来的信号，当前检测脚的电平跟上次的不一样
+        if ((VIBRATION_SENSOR_PIN && last_vibration_sensor_lev == 0) ||
+            (VIBRATION_SENSOR_PIN == 0 && last_vibration_sensor_lev)) {
+            // 清空关机的计时
+            pwr_off_cnt = 0;
 
-        //     // 在这里添加清空关机的计时操作
-        //     pwr_off_cnt = 0;
-
-        //     last_vibration_sensor_lev = VIBRATION_SENSOR_PIN;
-        //     // printf("detect lev\n"); // 测试可以检测到电平变化
-        // }
+            if (VIBRATION_SENSOR_PIN) {
+                last_vibration_sensor_lev = 1;
+            } else {
+                last_vibration_sensor_lev = 0;
+            }
+        }
 #endif
     }
 

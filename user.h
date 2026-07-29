@@ -16,10 +16,10 @@
 
 #include "user_config.h"
 
-#define u8 unsigned char
-#define u16 unsigned int
-#define u32 unsigned long int
-#define uint8_t unsigned char
+#define u8       unsigned char
+#define u16      unsigned int
+#define u32      unsigned long int
+#define uint8_t  unsigned char
 #define uint16_t unsigned int
 #define uint32_t unsigned long int
 
@@ -41,7 +41,7 @@
 #define DEF_CLR_BIT6 0xBF
 #define DEF_CLR_BIT7 0x7F
 
-#define ENABLE 1
+#define ENABLE  1
 #define DISABLE 0
 
 #define FAIL 1
@@ -49,11 +49,15 @@
 
 #define USER_DEBUG_ENABLE 0
 
-#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) || (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW))
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW))
 
 // 设备自动关机的时间，单位：100ms
 #define DEV_AUTO_SHUTDOWN_TIME ((u16)((u32)50 * 60 * 1000 / 100))
-
+#elif (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS)
+// 设备自动关机的时间，单位：100ms
+#define DEV_AUTO_SHUTDOWN_TIME ((u16)((u32)5 * 60 * 1000 / 100))
 #endif
 
 // 充电电压达到 4.0V 后，累计多少时间后判定为充满电，单位：100ms
@@ -107,8 +111,9 @@ enum
     LVD_LEV_3V0_SWITCHING,
     LVD_LEV_3V0,
 
-    LVD_LEV_2V9_SWITCHING, // 正在切换中(手册说,切换LVD档位后,至少等200us，LVD输出才稳定)
-    LVD_LEV_2V9,           // 切换完成
+    // 正在切换中(手册说,切换LVD档位后,至少等200us，LVD输出才稳定)
+    LVD_LEV_2V9_SWITCHING,
+    LVD_LEV_2V9, // 切换完成
 };
 
 // 定义电池电量的档位:
@@ -125,23 +130,17 @@ enum
 typedef u8 bat_lev_t;
 
 // 如果只消抖2次，会过滤不掉抖动
-#define KEY_FILTER_TIMES (3) // 按键消抖次数 (消抖时间 == 消抖次数 * 按键扫描时间)
+// 按键消抖次数 (消抖时间 == 消抖次数 * 按键扫描时间)
+#define KEY_FILTER_TIMES (3)
 // 按键松开后，等待连击的延时，单位：10 ms
 #define KEY_CLICK_DELAY_TIME ((u16)300 / 10)
 // 定义按键键值
 enum
 {
     KEY_ID_NONE = 0x00,
-    KEY_ID_VAILD,
+    KEY_ID_VALID,
 };
-// 定义按键事件
-// enum
-// {
-// 	KEY_EVENT_NONE = 0x00,
-// 	KEY_EVENT_CLICK, // 单击
-// 	KEY_EVENT_HOLD, //
-// 	KEY_EVENT_LOOSE, // 长按后松开
-// };
+
 // 定义设备的状态
 enum
 {
@@ -161,7 +160,6 @@ extern volatile u8 statusbuf;
 //===============Global Function===============
 void C_RAM(void);
 void IO_Init(void);
-void LVD_Init(void);
 void Sys_Init(void);
 
 void user_init(void);
@@ -221,4 +219,5 @@ extern volatile bit_flag_t flag2;
 
 #endif
 
-/**************************** end of file *********************************************/
+/**************************** end of file
+ * *********************************************/
