@@ -10,6 +10,6 @@
 #define PRODUCT_TYPE_P004_DS 3
 
 // 实际使用到的产品类型
-#define PRODUCT_TYPE PRODUCT_TYPE_P004_DS
+#define PRODUCT_TYPE PRODUCT_TYPE_P004_DW
 
 #endif
