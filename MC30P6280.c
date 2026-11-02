@@ -250,7 +250,8 @@ void user_init(void)
     DDR1 |= 0x01 << 4; // P14 输入模式
 
     // 滚珠检测引脚配置 P15
-    DDR1 |= 0x01 << 5; // 输入模式
+    PUCON &= ~(0x01 << 5); // 上拉电阻 20K，不开上拉会检测不到振动
+    DDR1 |= 0x01 << 5;     // 输入模式
 
     // 充电检测引脚
     DDR1 |= 0x01 << 3;
@@ -356,7 +357,8 @@ void led4_on(void)
 }
 
 #if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
-     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW))
+     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
 // 按键双击来进行开关机
 
 // 按键检测，放在10ms定时器中断处理
@@ -439,11 +441,14 @@ void key_scan(void)
 #if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
      (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
      (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+                // 有四个指示灯的设备
                 flag_led_1_on = 0;
                 flag_led_2_on = 0;
                 flag_led_3_on = 0;
                 flag_led_4_on = 0;
-#elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
+                // 有三个指示灯的设备
                 flag_led_2_on = 0;
                 flag_led_3_on = 0;
                 flag_led_4_on = 0;
@@ -763,7 +768,8 @@ void led_status_handle(void)
     }
 }
 
-#elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
 // 只有三个指示灯的设备
 
 // 放在 100ms 的定时器中断内调用
@@ -938,7 +944,8 @@ void led_refresh(void)
         sta = 0;
     }
 }
-#elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
 // 只有三个指示灯的设备
 
 // 根据电池电量和设备状态，来控制电池电量指示灯
@@ -1126,7 +1133,8 @@ void int_isr(void) __interrupt
 
                 /*
                     充电检测
-                    REVIEW 先执行充电检测，再执行按键扫描，避免刚拔出充电器，
+                    REVIEW
+                   先执行充电检测，再执行按键扫描，避免刚拔出充电器，
                     而检测不到按键事件
                 */
                 {
@@ -1151,11 +1159,14 @@ void int_isr(void) __interrupt
 #if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_JW) ||                                 \
      (PRODUCT_TYPE == PRODUCT_TYPE_P004_DW) ||                                 \
      (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS))
+                            // 四个指示灯的设备
                             flag_led_1_on = 0;
                             flag_led_2_on = 0;
                             flag_led_3_on = 0;
                             flag_led_4_on = 0;
-#elif (PRODUCT_TYPE == PRODUCT_TYPE_P003_JW)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P003_JW) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
+                            // 三个指示灯的设备
                             flag_led_2_on = 0;
                             flag_led_3_on = 0;
                             flag_led_4_on = 0;
@@ -1229,8 +1240,9 @@ void int_isr(void) __interrupt
             }
         }
 
-#if (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS)
-        如果检测到的振动传感器传来的信号，当前检测脚的电平跟上次的不一样
+#if ((PRODUCT_TYPE == PRODUCT_TYPE_P004_DS) ||                                 \
+     (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
+        // 如果检测到的振动传感器传来的信号，当前检测脚的电平跟上次的不一样
         if ((VIBRATION_SENSOR_PIN && last_vibration_sensor_lev == 0) ||
             (VIBRATION_SENSOR_PIN == 0 && last_vibration_sensor_lev)) {
             // 清空关机的计时

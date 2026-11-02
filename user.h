@@ -55,7 +55,8 @@
 
 // 设备自动关机的时间，单位：100ms
 #define DEV_AUTO_SHUTDOWN_TIME ((u16)((u32)50 * 60 * 1000 / 100))
-#elif (PRODUCT_TYPE == PRODUCT_TYPE_P004_DS)
+#elif ((PRODUCT_TYPE == PRODUCT_TYPE_P004_DS) ||                               \
+       (PRODUCT_TYPE == PRODUCT_TYPE_P003_JS))
 // 设备自动关机的时间，单位：100ms
 #define DEV_AUTO_SHUTDOWN_TIME ((u16)((u32)5 * 60 * 1000 / 100))
 #endif

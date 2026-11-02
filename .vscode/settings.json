@@ -26,14 +26,6 @@
         "editor.formatOnSave": false,
     },
     // clang-format配置
-    "C_Cpp.formatting": "clangFormat",
-    "Codegeex.RepoIndex": true, // 使用 clang-format 进行格式化
+    "C_Cpp.formatting": "clangFormat", // 使用 clang-format 进行格式化
+    "Codegeex.RepoIndex": true,
 }
-// | 配置项                                            | 作用                                  |
-// | ---------------------------------------------- | ----------------------------------- |
-// | `BreakBeforeBraces: Custom`                    | 使用自定义大括号换行规则                        |
-// | `AfterFunction: true`                          | 函数定义的大括号换行                          |
-// | `AfterClass/Struct/Enum/Namespace/Union: true` | 类、结构体等的大括号换行                        |
-// | `AfterControlStatement: Never`                 | `if`、`while`、`for` 等控制语句的大括号**不换行** |
-// | `BeforeElse: false`                            | `else` 前面不换行                        |
-// | `BeforeWhile: false`                           | `do-while` 中的 `while` 前面不换行         |
