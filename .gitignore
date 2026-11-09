@@ -1,0 +1,21 @@
+.agents/
+
+# WinScopeIDE-C 编译中间文件
+*.var
+*.cod
+*.cof
+*.lst
+*.map
+*.rep
+
+# 其它常见编译中间文件
+*.o
+*.obj
+*.d
+*.elf
+*.err
+
+# 备份文件
+*.bak
+*~
+

@@ -79,7 +79,8 @@
 #define CHARGE_PIN P13D
 
 // 定义LVD各个电压检测阈值配置：
-// 调用下面这些配置之前，需要先给对应的寄存器全部清零：
+// 这 7 个值是等差数列：MCR_LVD_CFG_2V9 + 2 * 挡位(0~6)
+// lvd_scan() 就是按这个规律算 MCR 的，所以不需要再列状态机
 #define MCR_LVD_CFG_ALL ((u8)(0x01 << 4 | 0x01 << 3 | 0x01 << 2 | 0x01 << 1))
 #define MCR_LVD_CFG_4V2 ((u8)(0x01 << 4 | 0x01 << 3 | 0x01 << 2 | 0x01 << 1))
 #define MCR_LVD_CFG_4V0 ((u8)(0x01 << 4 | 0x01 << 3 | 0x01 << 2))
@@ -88,34 +89,6 @@
 #define MCR_LVD_CFG_3V2 ((u8)(0x01 << 4 | 0x01 << 2 | 0x01 << 1))
 #define MCR_LVD_CFG_3V0 ((u8)(0x01 << 4 | 0x01 << 2))
 #define MCR_LVD_CFG_2V9 ((u8)(0x01 << 4 | 0x01 << 1))
-
-// 定义在lvd扫描时,需要切换到的各个配置状态:
-enum
-{
-    LVD_LEV_NONE = 0,
-
-    LVD_LEV_4V2_SWITCHING,
-    LVD_LEV_4V2,
-
-    LVD_LEV_4V0_SWITCHING,
-    LVD_LEV_4V0,
-
-    LVD_LEV_3V6_SWITCHING,
-    LVD_LEV_3V6,
-
-    LVD_LEV_3V3_SWITCHING,
-    LVD_LEV_3V3,
-
-    LVD_LEV_3V2_SWITCHING,
-    LVD_LEV_3V2,
-
-    LVD_LEV_3V0_SWITCHING,
-    LVD_LEV_3V0,
-
-    // 正在切换中(手册说,切换LVD档位后,至少等200us，LVD输出才稳定)
-    LVD_LEV_2V9_SWITCHING,
-    LVD_LEV_2V9, // 切换完成
-};
 
 // 定义电池电量的档位:
 enum
@@ -206,6 +179,21 @@ extern volatile bit_flag_t flag2;
 #define flag_led_2_on flag1.bits.bit3
 #define flag_led_3_on flag1.bits.bit4
 #define flag_led_4_on flag1.bits.bit5
+
+/*
+    翻转一个指示灯标志位。
+
+    不要写成 flag_led_x_on = ~flag_led_x_on;，也不要用 flag1.byte ^= xx;
+    这个编译器会生成 11 条指令；下面这种 if/else 写法只有 6 条。
+*/
+#define LED_FLAG_TOGGLE(f)                                                     \
+    do {                                                                       \
+        if (f) {                                                               \
+            f = 0;                                                             \
+        } else {                                                               \
+            f = 1;                                                             \
+        }                                                                      \
+    } while (0)
 // 设备是否运转（ USER_TO_DO 充电时，需要清空该标志位）
 #define flag_is_dev_working flag1.bits.bit6
 

@@ -15,41 +15,49 @@ u8 volatile statusbuf;
 volatile bit_flag_t flag1;
 volatile bit_flag_t flag2;
 
+/*
+    注意：这些全局变量都没有写 "= 0"。
+
+    上电时 C_RAM() 会把 RAM 全清一遍，写不写 "= 0" 效果一样；
+    但写了 "= 0" 的变量会被编译器放进 .cinit 段（初始化数据模板），
+    白白多占将近 100 个字的程序空间，这颗片子只有 1K。
+*/
+
 // 当前切换到的电池电压比较挡位：
-volatile bat_lev_t cur_cmp_bat_lev = 0;
+volatile bat_lev_t cur_cmp_bat_lev;
 /*
     临时的电池电压挡位
 
     刚上电时，或者是刚从低功耗期间唤醒，需要给它一个初始的默认值
 */
-volatile bat_lev_t tmp_bat_lev = 0;
-volatile bat_lev_t bat_lev = 0; // 稳定之后的、电池电压挡位
+volatile bat_lev_t tmp_bat_lev;
+volatile bat_lev_t bat_lev; // 稳定之后的、电池电压挡位
 
-volatile u16 pwr_off_cnt = 0; // xx min 自动关机的倒计时
+volatile u16 pwr_off_cnt; // xx min 自动关机的倒计时
 /*
     设备没有开机、并且没有在充电，累计计数，
     满足一定时间后进入低功耗
 */
-volatile u8 into_low_power_cnt = 0;
+volatile u8 into_low_power_cnt;
 
 // 控制充电动画 (REVIEW: 刚进入充电时，要注意清零)
-volatile u8 charge_anim_phase = 0;
+volatile u8 charge_anim_phase;
 
 // 充满电的计数值(REVIEW: 刚进入充电时，要注意清零)
-volatile u16 charge_fully_cnt = 0;
+volatile u16 charge_fully_cnt;
 
-volatile u8 led_sta_refresh_cnt = 0;
+volatile u8 led_sta_refresh_cnt;
 
-static volatile u8 cur_lvd_state = 0;
+static volatile u8 lvd_cmp_pending; // 1: MCR 已切好挡位，本次调用做比较
 
-static volatile u8 last_key_id = KEY_ID_NONE;
-static volatile u8 press_cnt = 0;               // 按键按下的时间计数
-static volatile u8 filter_cnt = 0;              // 按键消抖，使用的变量
-static volatile u8 filter_key_id = KEY_ID_NONE; // 按键消抖时使用的变量
+static volatile u8 last_key_id;
+static volatile u8 press_cnt;     // 按键按下的时间计数
+static volatile u8 filter_cnt;    // 按键消抖，使用的变量
+static volatile u8 filter_key_id; // 按键消抖时使用的变量
 // 按键短按松开之后，记录时间，用于判断这段时间内是否有再次按下
-static volatile u8 click_delay_cnt = 0;
-static volatile u8 click_cnt = 0; // 记录按键连击的次数
-volatile u8 cur_key_id = KEY_ID_NONE;
+static volatile u8 click_delay_cnt;
+static volatile u8 click_cnt; // 记录按键连击的次数
+volatile u8 cur_key_id;
 
 /************************************************
 ;  *    @Function Name       : C_RAM
@@ -87,103 +95,33 @@ void IO_Init(void)
     ODCON = 0x00; // 0:推挽输出  1:开漏输出
 }
 
-// 手册说切换LVD挡位后，至少隔200us，LVD的输出才有效：
-// 可以隔1ms再调用一次该函数
+/*
+    LVD 挡位扫描（在 100us 定时中断里，每 3 次调用一次，即 300us 一次）
+
+    每次调用做两件事：
+    1. 比较"上一次配置好的挡位"：切换挡位后已经隔了 300us，
+       满足手册要求的 200us 稳定时间；
+    2. 把 MCR 切到下一个挡位，等下一次调用再比较。
+
+    7 个挡位的 MCR 配置值是等差数列 0x12 + 2*n：
+    2V9=0x12, 3V0=0x14, 3V2=0x16, 3V3=0x18, 3V6=0x1A, 4V0=0x1C, 4V2=0x1E，
+    正好等于 MCR_LVD_CFG_2V9 + 2 * 挡位，所以不需要 14 个 case 的状态机，
+    可以省下一百多条指令。
+*/
 void lvd_scan(void)
 {
-    // static u8 cur_lvd_state = 0;
-
     LVDEN = 1; // 使能 LVD
 
-    switch (cur_lvd_state) {
-    case LVD_LEV_NONE:
-    case LVD_LEV_2V9:
-        // 当前变量是默认值0,或者是已经切换完一轮挡位,重新从4.2V开始切换挡位
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_4V2;
-        cur_lvd_state = LVD_LEV_4V2_SWITCHING;
-        break;
+    if (lvd_cmp_pending) {
+        lvd_cmp_pending = 0;
 
-    case LVD_LEV_4V2:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_4V0;
-        cur_lvd_state = LVD_LEV_4V0_SWITCHING;
-        break;
-
-    case LVD_LEV_4V0:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_3V6;
-        cur_lvd_state = LVD_LEV_3V6_SWITCHING;
-        break;
-
-    case LVD_LEV_3V6:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_3V3;
-        cur_lvd_state = LVD_LEV_3V3_SWITCHING;
-        break;
-
-    case LVD_LEV_3V3:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_3V2;
-        cur_lvd_state = LVD_LEV_3V2_SWITCHING;
-        break;
-
-    case LVD_LEV_3V2:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_3V0;
-        cur_lvd_state = LVD_LEV_3V0_SWITCHING;
-        break;
-
-    case LVD_LEV_3V0:
-        MCR &= ~MCR_LVD_CFG_ALL;
-        MCR |= MCR_LVD_CFG_2V9;
-        cur_lvd_state = LVD_LEV_2V9_SWITCHING;
-        break;
-        // ==========================================================
-        // ==========================================================
-
-    case LVD_LEV_4V2_SWITCHING:
-        cur_lvd_state = LVD_LEV_4V2;
-        cur_cmp_bat_lev = BAT_LEV_4V2;
-        break;
-    case LVD_LEV_4V0_SWITCHING:
-        cur_lvd_state = LVD_LEV_4V0;
-        cur_cmp_bat_lev = BAT_LEV_4V0;
-        break;
-    case LVD_LEV_3V6_SWITCHING:
-        cur_lvd_state = LVD_LEV_3V6;
-        cur_cmp_bat_lev = BAT_LEV_3V6;
-        break;
-    case LVD_LEV_3V3_SWITCHING:
-        cur_lvd_state = LVD_LEV_3V3;
-        cur_cmp_bat_lev = BAT_LEV_3V3;
-        break;
-    case LVD_LEV_3V2_SWITCHING:
-        cur_lvd_state = LVD_LEV_3V2;
-        cur_cmp_bat_lev = BAT_LEV_3V2;
-        break;
-    case LVD_LEV_3V0_SWITCHING:
-        cur_lvd_state = LVD_LEV_3V0;
-        cur_cmp_bat_lev = BAT_LEV_3V0;
-        break;
-    case LVD_LEV_2V9_SWITCHING:
-        cur_lvd_state = LVD_LEV_2V9;
-        cur_cmp_bat_lev = BAT_LEV_2V9;
-        break;
-    }
-
-    if (cur_lvd_state == LVD_LEV_4V2 || cur_lvd_state == LVD_LEV_4V0 ||
-        cur_lvd_state == LVD_LEV_3V6 || cur_lvd_state == LVD_LEV_3V3 ||
-        cur_lvd_state == LVD_LEV_3V2 || cur_lvd_state == LVD_LEV_3V0 ||
-        cur_lvd_state == LVD_LEV_2V9) {
         if (LVDF) {
             /*
-                如果当前 VDD电压 小于 BAT_LEV_XX ,
-                但 记录的挡位 大于等于 BAT_LEV_XX ,
-                将 记录的挡位 下调一级
+                当前 VDD电压 小于 该挡位，
+                而记录的挡位 大于等于 该挡位，
+                把记录的挡位 下调一级（2.9V 这一档直接给最低值，防止下溢）
             */
             if (tmp_bat_lev >= cur_cmp_bat_lev) {
-                // 防止下溢：
                 if (cur_cmp_bat_lev != BAT_LEV_2V9) {
                     tmp_bat_lev -= 1;
                 } else {
@@ -192,15 +130,11 @@ void lvd_scan(void)
             }
         } else {
             /*
-                如果当前检测 VDD电压 不小于 该挡位
-                但 记录的挡位 小于 该挡位
-                将 记录的挡位 上调一级
-
-                如果 记录的档位 等于 该档位
-                不作修改
+                当前 VDD电压 不小于 该挡位，
+                而记录的挡位 小于 该挡位，
+                把记录的挡位 上调一级（4.2V 这一档直接给最高值，防止上溢）
             */
             if (tmp_bat_lev < cur_cmp_bat_lev) {
-                // 防止上溢：
                 if (cur_cmp_bat_lev != BAT_LEV_4V2) {
                     tmp_bat_lev += 1;
                 } else {
@@ -208,7 +142,19 @@ void lvd_scan(void)
                 }
             }
         }
+
+        // 下一个挡位：4.2V -> 4.0V -> ... -> 2.9V -> 4.2V
+        if (cur_cmp_bat_lev != BAT_LEV_2V9) {
+            cur_cmp_bat_lev -= 1;
+        } else {
+            cur_cmp_bat_lev = BAT_LEV_4V2;
+        }
     }
+
+    // 把 MCR 的 bit1~bit4 切到 cur_cmp_bat_lev 对应的电压
+    MCR &= ~MCR_LVD_CFG_ALL;
+    MCR |= (MCR_LVD_CFG_2V9 + (cur_cmp_bat_lev << 1));
+    lvd_cmp_pending = 1;
 }
 
 /************************************************
@@ -227,7 +173,9 @@ void Sys_Init(void)
 
 // 毫秒级延时
 // 前提条件：FCPU = FHIRC / 1 / 2 == 8MHz
-void delay_ms(u32 xms)
+// 只用到 1~255ms（调用处只传了 1 和 10），参数用 u8 比 u32 省程序空间，
+// 调用处也不用再往栈上压 3 个字节
+void delay_ms(u8 xms)
 {
     while (xms) {
         u16 i = 531;
@@ -692,19 +640,19 @@ void led_status_handle(void)
                 switch (bat_lev) {
                 case BAT_LEV_4V2:
                 case BAT_LEV_4V0: // 4.0V 以上，用第四格指示灯
-                    flag_led_4_on = ~flag_led_4_on;
+                    LED_FLAG_TOGGLE(flag_led_4_on);
                     break;
                 case BAT_LEV_3V6: // 3.6V ~ 4.0V，用第三格指示灯
-                    flag_led_3_on = ~flag_led_3_on;
+                    LED_FLAG_TOGGLE(flag_led_3_on);
                     break;
                 case BAT_LEV_3V3: // 3.3V ~ 3.6V，用第二格指示灯
-                    flag_led_2_on = ~flag_led_2_on;
+                    LED_FLAG_TOGGLE(flag_led_2_on);
                     break;
                 // default:
                 case BAT_LEV_3V2:
                 case BAT_LEV_3V0:
                 case BAT_LEV_2V9: // 3.3V 以下的电压，用 第一格 指示灯
-                    flag_led_1_on = ~flag_led_1_on;
+                    LED_FLAG_TOGGLE(flag_led_1_on);
                     break;
                 }
 
@@ -721,27 +669,37 @@ void led_status_handle(void)
                 }
             }
         } else if (flag_is_dev_working) {
-            // 放电时，控制指示灯常亮
+            /*
+                放电时，按 bat_lev 控制指示灯常亮。
 
+                flag_led_x_on 是"只置1、不清0"的标志位，所以每个灯都要有
+                "不满足条件就熄灭"的分支；否则灯数只增不减：电量下降不掉格、
+                充电/开关机时残留的灯也清不掉，下次开机还会叠加上一次的状态。
+                （2026-07-29 为了省空间把这里的清零删掉了，是个回归）
+            */
             if (bat_lev < BAT_LEV_3V2) {
-                // 低电量，指示灯闪烁
-                flag_led_1_on = ~flag_led_1_on;
-            }
-
-            if (bat_lev >= BAT_LEV_3V2) {
+                // 低于 3.2V：只让第 1 格闪烁
+                LED_FLAG_TOGGLE(flag_led_1_on);
+            } else {
                 flag_led_1_on = 1;
             }
 
             if (bat_lev >= BAT_LEV_3V3) {
                 flag_led_2_on = 1;
+            } else {
+                flag_led_2_on = 0;
             }
 
             if (bat_lev >= BAT_LEV_3V6) {
                 flag_led_3_on = 1;
+            } else {
+                flag_led_3_on = 0;
             }
 
             if (bat_lev >= BAT_LEV_4V0) {
                 flag_led_4_on = 1;
+            } else {
+                flag_led_4_on = 0;
             }
         } else {
             // 不在充电，设备也没有在工作，关闭所有指示灯
@@ -824,17 +782,17 @@ void led_status_handle(void)
                 switch (bat_lev) {
                 case BAT_LEV_4V2:
                 case BAT_LEV_4V0: // 4.0V 以上，用第四格指示灯
-                    flag_led_4_on = ~flag_led_4_on;
+                    LED_FLAG_TOGGLE(flag_led_4_on);
                     break;
                 case BAT_LEV_3V6: // 3.6V ~ 4.0V，用第 二 格指示灯
-                    flag_led_3_on = ~flag_led_3_on;
+                    LED_FLAG_TOGGLE(flag_led_3_on);
                     break;
                 case BAT_LEV_3V3: // 3.3V ~ 3.6V，
                 case BAT_LEV_3V2:
                 case BAT_LEV_3V0:
                 case BAT_LEV_2V9: // 3.3V 以下的电压，用 第一格 指示灯
                     // flag_led_1_on = ~flag_led_1_on;
-                    flag_led_2_on = ~flag_led_2_on;
+                    LED_FLAG_TOGGLE(flag_led_2_on);
                     break;
                 }
 
@@ -847,25 +805,30 @@ void led_status_handle(void)
                 }
             }
         } else if (flag_is_dev_working) {
-            // 放电时，控制指示灯常亮
+            /*
+                放电时，按 bat_lev 控制指示灯常亮。
 
+                和四个灯的版本一样，flag_led_x_on 是"只置1、不清0"的标志位，
+                每个灯都要有"不满足条件就熄灭"的分支，否则灯数只增不减。
+            */
             if (bat_lev < BAT_LEV_3V3) {
-                // 小于 3.3V 的电量，指示灯闪烁
-                flag_led_2_on = ~flag_led_2_on;
-            }
-
-            if (bat_lev >= BAT_LEV_3V3) {
+                // 小于 3.3V：只让第 1 格闪烁
+                LED_FLAG_TOGGLE(flag_led_2_on);
+            } else {
                 flag_led_2_on = 1;
             }
 
             if (bat_lev >= BAT_LEV_3V6) {
                 flag_led_3_on = 1;
+            } else {
+                flag_led_3_on = 0;
             }
 
             if (bat_lev >= BAT_LEV_4V0) {
                 flag_led_4_on = 1;
+            } else {
+                flag_led_4_on = 0;
             }
-
         } else {
             // 不在充电，设备也没有在工作，关闭所有指示灯
             flag_led_2_on = 0;
@@ -901,7 +864,7 @@ void led_status_handle(void)
 // 目前暂定在 100us 定时器中断里面调用
 void led_refresh(void)
 {
-    static volatile u8 sta = 0;
+    static volatile u8 sta;
 
     if (0 == flag_is_led_show_enable) {
         return;
@@ -952,7 +915,7 @@ void led_refresh(void)
 // 目前暂定在 100us 定时器中断里面调用
 void led_refresh(void)
 {
-    static volatile u8 sta = 0;
+    static volatile u8 sta;
 
     if (0 == flag_is_led_show_enable) {
         return;
@@ -992,8 +955,19 @@ void led_refresh(void)
 
 void main(void)
 {
-    Sys_Init();
+    Sys_Init(); // 上电：C_RAM() 清 RAM + IO 初始化
     user_init();
+
+    /*
+        上电时先测一次电量档位：
+
+        Sys_Init() 里的 C_RAM() 已经把 RAM 清零，bat_lev 是 0（2.9V），
+        必须给它一个有效值。之后 Stop 唤醒不再清 RAM，bat_lev 会一直
+        沿用"上次显示出去的档位"，这样关机静置后电池电压回升也不会多亮一格。
+    */
+    tmp_bat_lev = BAT_LEV_4V2; // 从最高档开始，让 lvd_scan 从上往下收敛
+    delay_ms(10);              // 等 lvd_scan 扫完一轮（约 4.5ms）
+    bat_lev = tmp_bat_lev;
 
     into_low_power_cnt = (u8)((u16)2000 / 10); // 确保一上电就进入低功耗
 
@@ -1049,31 +1023,50 @@ void main(void)
             */
             // PUCON |= (0x01 << 1 | 0x01 << 2);
 
-            Sys_Init();
-            user_init();
+            /*
+                唤醒后不再调用 Sys_Init()（里面有 C_RAM()，会把 RAM 全清）：
 
-            if (CHARGE_PIN == 0) {
-                // 没有在充电，可能是按键唤醒，这里给变量最大值作为初始值
-                tmp_bat_lev = BAT_LEV_4V2; // 唤醒后，给一个默认值
-                bat_lev = BAT_LEV_4V2;
-            } else {
-                // 在充电，可能是充电唤醒，这里给变量最小值作为初始值
-                tmp_bat_lev = BAT_LEV_2V9;
-                bat_lev = BAT_LEV_2V9;
-            }
+                bat_lev 要保留"上次显示出去的档位"，否则关机静置后电池电压
+                回升，再开机会多亮一格。这里只把"每次唤醒都必须重新初始化"的
+                变量重新赋值，相当于把原来 C_RAM() 清的那部分自己写一遍。
+            */
+            GIE = 0;
+            IO_Init();
+
+            flag1.byte = 0; // 充电标志、刚充电标志、4个指示灯、运行标志、振动电平
+            flag2.byte = 0; // LED 显示使能
+
+            lvd_cmp_pending = 0;       // LVD 扫描：先切挡位，下一次调用再比较
+            tmp_bat_lev = BAT_LEV_4V2; // 从最高档往下收敛，避免旧值偏低造成误降档
+                                       // 注意：bat_lev 不清，保留上次显示的档位
+
+            // 按键消抖/连击状态必须清，否则唤醒用的这次按键会被当成上一次的连击
+            last_key_id = KEY_ID_NONE;
+            filter_key_id = KEY_ID_NONE;
+            filter_cnt = 0;
+            click_cnt = 0;
+            click_delay_cnt = 0;
+
+            pwr_off_cnt = 0;        // 自动关机计时
+            into_low_power_cnt = 0; // 不清会立刻又进低功耗
 
             /*
-                在 timer0 中断内调用了 lvd_scan()，这里要等待一段时间，
-                等 tmp_bat_lev 的值更新
+                charge_anim_phase、charge_fully_cnt 在进入充电时会（在 timer0
+                中断里）清零；led_sta_refresh_cnt 和中断里的 static 计数
+                （cnt_1ms / cnt_10ms / is_not_charge_cnt / led_refresh 的 sta）
+                只是相位计数，留着不影响功能，这里不再逐个清。
             */
+
+            GIE = 1;
+            user_init();
+
+            // 等 lvd_scan 扫完一轮，把 tmp_bat_lev 更新到实际档位
             delay_ms(10);
-            // 强制更新 bat_lev
-            // ，防止开机后又立刻刷新了电量，导致显示的电池电量格数变化
-            bat_lev = tmp_bat_lev;
             flag_is_led_show_enable = 1; // 确保电池电量更新后，再使能led显示
 
             // 没有在充电并且低电量，重新回到低功耗
-            if (CHARGE_PIN == 0 && bat_lev < BAT_LEV_3V0) {
+            // 这里要用 tmp_bat_lev（刚测到的档位），不能用保留的 bat_lev
+            if (CHARGE_PIN == 0 && tmp_bat_lev < BAT_LEV_3V0) {
                 goto label_low_power_in;
             }
         }
@@ -1100,14 +1093,14 @@ void int_isr(void) __interrupt
         T0CNT = (u8)(255 - 125); // T0 目前1ms产生一次中断
 
         {
-            static volatile u8 cnt_1ms = 0;
+            static volatile u8 cnt_1ms;
             cnt_1ms++;
             if (cnt_1ms >= 10) {
                 cnt_1ms = 0;
                 // 10ms进入一次
 
                 {
-                    static volatile u8 cnt_10ms = 0;
+                    static volatile u8 cnt_10ms;
                     cnt_10ms++;
                     if (cnt_10ms >= 10) {
                         cnt_10ms = 0;
@@ -1139,7 +1132,7 @@ void int_isr(void) __interrupt
                 */
                 {
                     // RAM空间不够，省略了充电检测的消抖和滤波操作
-                    static volatile u8 is_not_charge_cnt = 0;
+                    static volatile u8 is_not_charge_cnt;
                     /*
                         一旦有充电信号，就直接进入充电判断逻辑
                         断开充电时，才加入滤波，避免误判
@@ -1184,6 +1177,14 @@ void int_isr(void) __interrupt
                         if (is_not_charge_cnt >= (200 / 10)) {
                             is_not_charge_cnt = 0;
                             flag_is_in_charging = 0;
+                            /*
+                                充电结束，用实测值重新同步一次档位：
+                                充电开始时把 bat_lev 重置成了 BAT_LEV_2V9，
+                                如果这里不重新同步，遇到"插一下马上拔掉"或者
+                                充电脚被干扰的情况，bat_lev 会一直停在最低档，
+                                开机后会误判成没电、直接关机。
+                            */
+                            bat_lev = tmp_bat_lev;
                         }
                     }
                 }
@@ -1191,7 +1192,9 @@ void int_isr(void) __interrupt
                 key_scan();
 
                 // 低电量关机
-                if (flag_is_dev_working && bat_lev == BAT_LEV_2V9) {
+                // 用实测的 tmp_bat_lev 判断：bat_lev 是"显示档位"，
+                // 关机后它会保留、不会再跟着回升，用它判断会误关机
+                if (flag_is_dev_working && tmp_bat_lev == BAT_LEV_2V9) {
                     pen_pwr_off();           // 断开笔头的供电
                     led_all_off();           // 关闭所有指示灯
                     flag_is_dev_working = 0; // 表示设备关闭
@@ -1216,12 +1219,21 @@ void int_isr(void) __interrupt
                 if (bat_lev >= tmp_bat_lev) {
                     bat_lev = tmp_bat_lev;
                 }
-            } else {
+            } else if (flag_is_in_charging) {
                 // 正在充电，电量只能增大，不能减小
                 if (bat_lev <= tmp_bat_lev) {
                     bat_lev = tmp_bat_lev;
                 }
             }
+            /*
+                没在充电、设备也没有工作（关机/待机）：
+
+                不改 bat_lev，保留上次显示出去的档位。
+                否则关机静置后电池电压会回升，下次开机就多亮一格。
+
+                电量真正往上走的只有一条路：进入充电
+                （充电检测会把 bat_lev 重置成 BAT_LEV_2V9，再按充电电压一档一档往上跑）。
+            */
         }
     }
 
@@ -1232,7 +1244,7 @@ void int_isr(void) __interrupt
         led_refresh();
 
         {
-            static volatile u8 cnt = 0;
+            static volatile u8 cnt;
             cnt++;
             if (cnt >= 3) {
                 cnt = 0;
