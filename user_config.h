@@ -15,6 +15,6 @@
 #define PRODUCT_TYPE_P003_JS 4
 
 // 实际使用到的产品类型
-#define PRODUCT_TYPE PRODUCT_TYPE_P003_JS
+#define PRODUCT_TYPE PRODUCT_TYPE_P004_JW
 
 #endif
