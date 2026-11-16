@@ -33,6 +33,10 @@ volatile bat_lev_t cur_cmp_bat_lev;
 volatile bat_lev_t tmp_bat_lev;
 volatile bat_lev_t bat_lev; // 稳定之后的、电池电压挡位
 
+// 电量挡位消抖，使用的变量
+// 实测挡位低于显示挡位，已经连续出现的次数
+static volatile u8 bat_lev_filter_cnt;
+
 volatile u16 pwr_off_cnt; // xx min 自动关机的倒计时
 /*
     设备没有开机、并且没有在充电，累计计数，
@@ -155,6 +159,53 @@ void lvd_scan(void)
     MCR &= ~MCR_LVD_CFG_ALL;
     MCR |= (MCR_LVD_CFG_2V9 + (cur_cmp_bat_lev << 1));
     lvd_cmp_pending = 1;
+}
+
+/*
+    电量挡位消抖（在 1ms 定时中断里，每 100ms 调用一次）
+
+    LVD 每 300us 只比较一个挡位，tmp_bat_lev 会跟着电源纹波跳：
+
+    - 向下：同一轮里 3V6、3V3、3V2 都会判"低于挡位"，
+      电压的一次跌落就能让实测挡位连降好几级；
+    - 向上：每轮只升一级，纹波的一个峰值就能让挡位多跳一格。
+
+    所以实测挡位不能直接拿去显示。这里只在放电时更新显示挡位：
+
+    - 实测挡位连续 BAT_LEV_FILTER_TIMES 次（500ms）都低于显示挡位，
+      才允许把显示挡位降下来；中间只要有一次读到不低于显示挡位
+      （电源纹波的一个峰值就会这样），就重新计数。
+      这样纹波既推不上去、也不会把挡位打下来。
+    - 只允许下降，不允许上升
+      （客户要求：开机使用时，电量不能上升）。
+    - 关机/待机：不改，保留上次显示出去的挡位
+      （否则关机静置后电池电压回升，下次开机就多亮一格）。
+
+    充电时的挡位不在这里更新，在 1ms 分支里直接跟进，只增不减。
+*/
+void bat_lev_filter(void)
+{
+    if (flag_is_in_charging || (0 == flag_is_dev_working)) {
+        // 充电时的挡位在 1ms 分支里跟进；关机/待机时挡位保持不变
+        bat_lev_filter_cnt = 0;
+        return;
+    }
+
+    if (tmp_bat_lev >= bat_lev) {
+        // 实测挡位没有变低（或者比显示挡位高），重新计数
+        bat_lev_filter_cnt = 0;
+        return;
+    }
+
+    if (bat_lev_filter_cnt < BAT_LEV_FILTER_TIMES) {
+        // 防止计数溢出
+        bat_lev_filter_cnt++;
+        return;
+    }
+
+    // 连续 500ms 都低于显示挡位，才更新（只减不增）
+    bat_lev = tmp_bat_lev;
+    bat_lev_filter_cnt = 0;
 }
 
 /************************************************
@@ -1106,6 +1157,8 @@ void int_isr(void) __interrupt
                         cnt_10ms = 0;
                         // 100 ms 进入一次
 
+                        // 先消抖，再让指示灯按新挡位显示
+                        bat_lev_filter();
                         led_status_handle();
                         if (flag_is_dev_working) {
                             /*
@@ -1131,15 +1184,26 @@ void int_isr(void) __interrupt
                     而检测不到按键事件
                 */
                 {
-                    // RAM空间不够，省略了充电检测的消抖和滤波操作
                     static volatile u8 is_not_charge_cnt;
+                    // 充电检测的消抖计数
+                    static volatile u8 is_charge_cnt;
                     /*
-                        一旦有充电信号，就直接进入充电判断逻辑
-                        断开充电时，才加入滤波，避免误判
+                        断开充电时要滤波，避免误判；
+                        接上充电时也要连续 CHARGE_FILTER_TIMES 次（30ms）都是高电平，
+                        才认为插上了充电器。
+
+                        只有一次高电平就进入充电的话，充电脚上的一点干扰就会
+                        把笔头断电、把电量挡位打回最低档，之后电量看起来
+                        就是"先掉下去、再跳上来"。
                     */
                     if (CHARGE_PIN) {
                         is_not_charge_cnt = 0; // 只要有充电信号，就清空计数
-                        if (0 == flag_is_in_charging) {
+                        if (is_charge_cnt < CHARGE_FILTER_TIMES) {
+                            is_charge_cnt++;
+                        }
+
+                        if ((0 == flag_is_in_charging) &&
+                            (is_charge_cnt >= CHARGE_FILTER_TIMES)) {
                             /*
                                 刚进入充电，需要将记录的电池电量改为最低档，
                                 让它之后升上去
@@ -1173,18 +1237,28 @@ void int_isr(void) __interrupt
                             flag_is_in_charging = 1;
                         }
                     } else {
+                        is_charge_cnt = 0;
                         is_not_charge_cnt++;
                         if (is_not_charge_cnt >= (200 / 10)) {
                             is_not_charge_cnt = 0;
-                            flag_is_in_charging = 0;
                             /*
                                 充电结束，用实测值重新同步一次档位：
                                 充电开始时把 bat_lev 重置成了 BAT_LEV_2V9，
                                 如果这里不重新同步，遇到"插一下马上拔掉"或者
                                 充电脚被干扰的情况，bat_lev 会一直停在最低档，
                                 开机后会误判成没电、直接关机。
+
+                                注意：只有真正从"正在充电"退出来时才同步。
+                                没有在充电的时候绝对不能动 bat_lev，
+                                否则就等于每 200ms 用实测值覆盖一次显示挡位，
+                                "电量只能减小、不能增大"的限制会全部失效，
+                                电源纹波就能让指示灯在两格和三格之间跳。
                             */
-                            bat_lev = tmp_bat_lev;
+                            if (flag_is_in_charging) {
+                                flag_is_in_charging = 0;
+                                bat_lev = tmp_bat_lev;
+                                bat_lev_filter_cnt = 0;
+                            }
                         }
                     }
                 }
@@ -1192,9 +1266,9 @@ void int_isr(void) __interrupt
                 key_scan();
 
                 // 低电量关机
-                // 用实测的 tmp_bat_lev 判断：bat_lev 是"显示档位"，
-                // 关机后它会保留、不会再跟着回升，用它判断会误关机
-                if (flag_is_dev_working && tmp_bat_lev == BAT_LEV_2V9) {
+                // 用消抖之后的 bat_lev 判断：单次快照可能正好落在电压跌落的
+                // 瞬间，用它判断会误关机
+                if (flag_is_dev_working && bat_lev == BAT_LEV_2V9) {
                     pen_pwr_off();           // 断开笔头的供电
                     led_all_off();           // 关闭所有指示灯
                     flag_is_dev_working = 0; // 表示设备关闭
@@ -1212,24 +1286,22 @@ void int_isr(void) __interrupt
             }
         }
 
-        // USER_TO_DO 如果还有多的程序空间，要给这里加上滤波
         {
-            if (flag_is_dev_working) {
-                // 正在放电，电量只能减小，不能增大
-                if (bat_lev >= tmp_bat_lev) {
-                    bat_lev = tmp_bat_lev;
-                }
-            } else if (flag_is_in_charging) {
-                // 正在充电，电量只能增大，不能减小
-                if (bat_lev <= tmp_bat_lev) {
-                    bat_lev = tmp_bat_lev;
-                }
+            /*
+                正在充电：电量只能增大，不能减小（客户要求）。
+
+                这里直接在 1ms 分支里跟进，是为了让刚插上充电器时的跑马灯
+                动画还能按 tmp_bat_lev 一档一档往上亮，不用等消抖。
+            */
+            if (flag_is_in_charging && (bat_lev < tmp_bat_lev)) {
+                bat_lev = tmp_bat_lev;
             }
             /*
-                没在充电、设备也没有工作（关机/待机）：
-
-                不改 bat_lev，保留上次显示出去的档位。
-                否则关机静置后电池电压会回升，下次开机就多亮一格。
+                - 正在放电（开机使用）：挡位在 bat_lev_filter() 里每 100ms
+                  更新一次，只允许减小、不允许上升，并且要消抖；
+                - 没在充电、设备也没有工作（关机/待机）：不改 bat_lev，
+                  保留上次显示出去的档位。
+                  否则关机静置后电池电压会回升，下次开机就多亮一格。
 
                 电量真正往上走的只有一条路：进入充电
                 （充电检测会把 bat_lev 重置成 BAT_LEV_2V9，再按充电电压一档一档往上跑）。

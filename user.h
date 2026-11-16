@@ -67,6 +67,18 @@
 // 指示灯状态的刷新间隔，单位：100ms
 #define LED_STA_REFRESH_TIME ((u8)(500 / 100))
 
+/*
+    电量挡位、充电检测的消抖次数
+
+    电源本身有纹波时，LVD 实测到的挡位会在两个相邻挡位之间来回跳
+    （例如 3.92V 的电源，电压正好跨在 4.0V 这个阈值上），
+    所以实测挡位不能直接拿去显示，必须先消抖。
+*/
+// 电量挡位的消抖次数，消抖时间 == 消抖次数 * 100ms
+#define BAT_LEV_FILTER_TIMES (5)
+// 充电检测的消抖次数，消抖时间 == 消抖次数 * 10ms
+#define CHARGE_FILTER_TIMES (3)
+
 // 按键检测引脚
 #if 1
 #define KEY_SCAN_PIN P10D
@@ -148,6 +160,7 @@ void led_refresh(void);
 
 void key_scan(void);
 void lvd_scan(void);
+void bat_lev_filter(void);
 
 //===============Define  Flag===============
 typedef union
