@@ -83,7 +83,7 @@
 #if 1
 #define KEY_SCAN_PIN P10D
 #else
-#define KEY_SCAN_PIN P12D // USER_TO_DO 测试时使用
+#define KEY_SCAN_PIN P12D // TEST ONLY 测试时使用
 #endif
 // 振动传感器检测脚
 #define VIBRATION_SENSOR_PIN P15D
@@ -207,7 +207,7 @@ extern volatile bit_flag_t flag2;
             f = 1;                                                             \
         }                                                                      \
     } while (0)
-// 设备是否运转（ USER_TO_DO 充电时，需要清空该标志位）
+// 设备是否运转（ 充电时，需要清空该标志位 ）
 #define flag_is_dev_working flag1.bits.bit6
 
 // 上一次从传感器检测脚读取到的电平

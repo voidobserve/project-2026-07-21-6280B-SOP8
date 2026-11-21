@@ -1084,12 +1084,14 @@ void main(void)
             GIE = 0;
             IO_Init();
 
-            flag1.byte = 0; // 充电标志、刚充电标志、4个指示灯、运行标志、振动电平
+            // 充电标志、刚充电标志、4个指示灯、运行标志、振动电平
+            flag1.byte = 0;
             flag2.byte = 0; // LED 显示使能
 
-            lvd_cmp_pending = 0;       // LVD 扫描：先切挡位，下一次调用再比较
-            tmp_bat_lev = BAT_LEV_4V2; // 从最高档往下收敛，避免旧值偏低造成误降档
-                                       // 注意：bat_lev 不清，保留上次显示的档位
+            lvd_cmp_pending = 0; // LVD 扫描：先切挡位，下一次调用再比较
+            // 从最高档往下收敛，避免旧值偏低造成误降档
+            // 注意：bat_lev 不清，保留上次显示的档位
+            tmp_bat_lev = BAT_LEV_4V2;
 
             // 按键消抖/连击状态必须清，否则唤醒用的这次按键会被当成上一次的连击
             last_key_id = KEY_ID_NONE;
@@ -1189,8 +1191,8 @@ void int_isr(void) __interrupt
                     static volatile u8 is_charge_cnt;
                     /*
                         断开充电时要滤波，避免误判；
-                        接上充电时也要连续 CHARGE_FILTER_TIMES 次（30ms）都是高电平，
-                        才认为插上了充电器。
+                        接上充电时也要连续 CHARGE_FILTER_TIMES
+                       次（30ms）都是高电平， 才认为插上了充电器。
 
                         只有一次高电平就进入充电的话，充电脚上的一点干扰就会
                         把笔头断电、把电量挡位打回最低档，之后电量看起来
@@ -1304,7 +1306,8 @@ void int_isr(void) __interrupt
                   否则关机静置后电池电压会回升，下次开机就多亮一格。
 
                 电量真正往上走的只有一条路：进入充电
-                （充电检测会把 bat_lev 重置成 BAT_LEV_2V9，再按充电电压一档一档往上跑）。
+                （充电检测会把 bat_lev 重置成
+               BAT_LEV_2V9，再按充电电压一档一档往上跑）。
             */
         }
     }
